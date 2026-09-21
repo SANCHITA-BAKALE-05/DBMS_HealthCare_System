@@ -1,17 +1,44 @@
 // ============================================================
 // appointmentController.js
-// Complete appointment booking workflow.
 //
-// Tables used:
-//   Appointment         (appointment_id, patient_id, availability_id, reason, status)
-//   Doctor_Availability (availability_id, doctor_id, available_date, start_time, end_time, status)
-//   Appointment_Audit   — handled automatically by DB trigger (do NOT insert manually)
+// PURPOSE:
+//   Manages the complete appointment lifecycle:
+//   booking, viewing, cancelling, and status updates.
 //
-// Key rules from existing schema:
-//   - availability_id is UNIQUE in Appointment (one booking per slot)
-//   - Booking must update Doctor_Availability.status to 'BOOKED'
-//   - Both operations run inside a transaction
-//   - DB trigger handles Appointment_Audit automatically on UPDATE
+// DATABASE TABLES USED:
+//   Appointment
+//     appointment_id  — unique ID like 'AP001'
+//     patient_id      — which patient booked
+//     availability_id — which doctor time slot was booked
+//     reason          — why the patient is visiting (optional text)
+//     status          — PENDING → CONFIRMED → COMPLETED (or CANCELLED)
+//
+//   Doctor_Availability
+//     availability_id — unique slot ID
+//     doctor_id       — which doctor the slot belongs to
+//     available_date  — the date of the slot
+//     start_time / end_time — slot time
+//     status          — AVAILABLE, BOOKED, or BLOCKED
+//
+//   Appointment_Audit — automatically managed by a MySQL trigger.
+//     Every time an Appointment row is UPDATED, the trigger
+//     records the old and new status in Appointment_Audit.
+//     We never insert into Appointment_Audit manually.
+//
+// IMPORTANT — TRANSACTIONS:
+//   Booking and cancelling use database transactions.
+//   A transaction means: "do both operations together, or
+//   do neither". This prevents a race condition where two
+//   patients try to book the same slot at the same time.
+//
+//   Example — booking:
+//     BEGIN TRANSACTION
+//       1. Lock the slot row (FOR UPDATE prevents anyone else reading it)
+//       2. Check slot is still AVAILABLE
+//       3. Insert into Appointment
+//       4. Update slot status to BOOKED
+//     COMMIT  ← only saved if all 4 steps succeed
+//     ROLLBACK if any step fails
 // ============================================================
 
 const db = require('../config/db');

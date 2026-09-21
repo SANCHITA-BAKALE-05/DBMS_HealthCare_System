@@ -10,6 +10,10 @@
 import React, { useState } from 'react'
 import Layout from '../../components/Layout'
 import { mlAPI } from '../../services/api'
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Cell, LabelList
+} from 'recharts'
 
 const DISCLAIMER = `This result is an estimate from a machine-learning model and is NOT a medical diagnosis or professional medical advice. 
 Please consult a qualified healthcare professional before making any health decisions.`
@@ -351,16 +355,111 @@ const ObesityForm = ({ onResult }) => {
 
 // ---- Result display ----
 
-const BinaryResult = ({ result }) => {
+// ── Risk colour helper (green / amber / red)
+const riskColor = (pct) =>
+  pct < 30 ? '#16a34a' : pct < 60 ? '#d97706' : '#dc2626'
+
+const riskBgColor = (pct) =>
+  pct < 30 ? '#dcfce7' : pct < 60 ? '#fef9c3' : '#fee2e2'
+
+// ── Visual risk bar chart for binary risk results
+const BinaryResult = ({ result, modelLabel }) => {
   if (!result) return null
   const pct = result.estimated_percentage
-  const color = pct < 30 ? 'var(--success)' : pct < 60 ? 'var(--warning)' : 'var(--danger)'
+  const color = riskColor(pct)
+
+  // Build chart data: one bar for risk, one for "safe" remainder
+  const chartData = [
+    {
+      name: 'Estimated Risk',
+      value: pct,
+      fill: color
+    },
+    {
+      name: 'No Risk Indicated',
+      value: Math.max(0, 100 - pct),
+      fill: '#e2e8f0'
+    }
+  ]
+
   return (
     <div className="card" style={{ marginTop: 20 }}>
-      <div className="card-title">Model-Estimated Result</div>
-      <div style={{ fontSize: 36, fontWeight: 800, color, marginBottom: 8 }}>{pct}%</div>
-      <div>Estimated probability: <strong>{result.estimated_probability?.toFixed(4)}</strong></div>
-      <div style={{ marginTop: 4 }}>Risk level: <span className="badge" style={{ background: color === 'var(--success)' ? '#dcfce7' : color === 'var(--warning)' ? '#fef9c3' : '#fee2e2', color: color }}>{result.risk_level}</span></div>
+      <div className="card-title">Predicted Risk Probability — {modelLabel}</div>
+
+      {/* Visual percentage display */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+        <div style={{ fontSize: 42, fontWeight: 800, color, lineHeight: 1 }}>{pct}%</div>
+        <div>
+          <div style={{ marginBottom: 4 }}>
+            Risk level:{' '}
+            <span
+              className="badge"
+              style={{ background: riskBgColor(pct), color }}
+            >
+              {result.risk_level}
+            </span>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+            Estimated probability: <strong>{result.estimated_probability?.toFixed(4)}</strong>
+          </div>
+        </div>
+      </div>
+
+      {/* Horizontal stacked bar */}
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 6 }}>
+          Risk visualisation
+        </div>
+        <div style={{ display: 'flex', height: 28, borderRadius: 6, overflow: 'hidden', background: '#e2e8f0' }}>
+          <div
+            style={{
+              width: `${pct}%`,
+              background: color,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              fontSize: 12,
+              fontWeight: 700,
+              transition: 'width 0.6s ease',
+              minWidth: pct > 10 ? undefined : 0
+            }}
+          >
+            {pct >= 10 ? `${pct}%` : ''}
+          </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+          <span>0%</span>
+          <span style={{ color }}>Risk: {pct}%</span>
+          <span>100%</span>
+        </div>
+      </div>
+
+      {/* Recharts bar for detailed view */}
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>
+          Risk breakdown
+        </div>
+        <ResponsiveContainer width="100%" height={70}>
+          <BarChart
+            data={chartData}
+            layout="vertical"
+            margin={{ top: 0, right: 40, left: 120, bottom: 0 }}
+            barSize={20}
+          >
+            <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10 }} tickFormatter={v => `${v}%`} />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={118} />
+            <Tooltip formatter={(v) => [`${v}%`, '']} />
+            <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+              {chartData.map((d, i) => (
+                <Cell key={i} fill={d.fill} />
+              ))}
+              <LabelList dataKey="value" position="right" formatter={v => `${v}%`} style={{ fontSize: 11, fill: '#1e293b' }} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
       <div className="ml-disclaimer" style={{ marginTop: 12 }}>{result.disclaimer}</div>
     </div>
   )
@@ -368,25 +467,53 @@ const BinaryResult = ({ result }) => {
 
 const ObesityResult = ({ result }) => {
   if (!result) return null
+
+  // Build recharts data for obesity class probabilities
+  const obesityChartData = result.all_class_probabilities
+    ? Object.entries(result.all_class_probabilities)
+        .sort((a, b) => b[1] - a[1])
+        .map(([cls, pct]) => ({ name: cls, value: pct }))
+    : []
+
+  const OBESITY_COLORS = ['#dc2626', '#d97706', '#d97706', '#16a34a', '#2563eb', '#7c3aed']
+
   return (
     <div className="card" style={{ marginTop: 20 }}>
-      <div className="card-title">Model-Estimated Obesity Category</div>
-      <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--primary)', marginBottom: 8 }}>{result.predicted_category}</div>
-      <div>Confidence: <strong>{result.confidence}%</strong></div>
-      {result.all_class_probabilities && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--muted)' }}>All Category Probabilities:</div>
-          {Object.entries(result.all_class_probabilities).sort((a,b) => b[1]-a[1]).map(([cls, pct]) => (
-            <div key={cls} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-              <span style={{ width: 200, fontSize: 12 }}>{cls}</span>
-              <div style={{ flex: 1, background: '#f1f5f9', borderRadius: 4, height: 8 }}>
-                <div style={{ width: `${pct}%`, background: 'var(--primary)', borderRadius: 4, height: 8 }}/>
-              </div>
-              <span style={{ fontSize: 12, width: 50, textAlign: 'right' }}>{pct}%</span>
-            </div>
-          ))}
+      <div className="card-title">Predicted Obesity Category</div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+        <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--primary)' }}>
+          {result.predicted_category}
+        </div>
+        <span className="badge badge-blue">Confidence: {result.confidence}%</span>
+      </div>
+
+      {obesityChartData.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 6 }}>
+            All Category Probabilities
+          </div>
+          <ResponsiveContainer width="100%" height={obesityChartData.length * 38 + 20}>
+            <BarChart
+              data={obesityChartData}
+              layout="vertical"
+              margin={{ top: 0, right: 48, left: 180, bottom: 0 }}
+              barSize={20}
+            >
+              <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10 }} tickFormatter={v => `${v}%`} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={178} />
+              <Tooltip formatter={(v) => [`${v}%`, 'Probability']} />
+              <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                {obesityChartData.map((_, i) => (
+                  <Cell key={i} fill={OBESITY_COLORS[i % OBESITY_COLORS.length]} />
+                ))}
+                <LabelList dataKey="value" position="right" formatter={v => `${v}%`} style={{ fontSize: 11, fill: '#1e293b' }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       )}
+
       <div className="ml-disclaimer">{result.disclaimer}</div>
     </div>
   )
@@ -441,7 +568,12 @@ const MLPrediction = () => {
         {active === 'obesity'        && <ObesityForm      onResult={r => setResult('obesity', r)}/>}
       </div>
 
-      {active !== 'obesity' && <BinaryResult  result={results[active]}/>}
+      {active !== 'obesity' && (
+        <BinaryResult
+          result={results[active]}
+          modelLabel={MODELS.find(m => m.key === active)?.label}
+        />
+      )}
       {active === 'obesity' && <ObesityResult result={results['obesity']}/>}
     </Layout>
   )
